@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  pack-and-publish:
+    name: Pack and Publish to NuGet
+    runs-on: ubuntu-latest
+    environment: nuget-publish
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect .NET version
+        id: detect
+        run: |
+          DOTNET_VER=$(grep -oP '<TargetFramework>net\K[0-9]+' Directory.Build.props)
+          echo "dotnet_version=${DOTNET_VER}.0.x" >> $GITHUB_OUTPUT
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ steps.detect.outputs.dotnet_version }}
+
+      - name: Build
+        run: dotnet build src/TickerQ.MongoDB/TickerQ.MongoDB.csproj --configuration Release
+
+      - name: Test (gate publish on tests passing)
+        run: dotnet test tests/TickerQ.MongoDB.Tests/TickerQ.MongoDB.Tests.csproj --configuration Release
+
+      - name: Pack
+        run: dotnet pack src/TickerQ.MongoDB/TickerQ.MongoDB.csproj --configuration Release --no-build --output ./nupkgs
+
+      - name: Show package sizes
+        run: |
+          for pkg in ./nupkgs/*.nupkg ./nupkgs/*.snupkg; do
+            [ -f "$pkg" ] && echo " - $(basename "$pkg"): $(du -h "$pkg" | cut -f1)"
+          done
+
+      - name: Upload nupkgs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs
+          path: ./nupkgs
+
+      - name: Push to NuGet
+        run: |
+          for f in ./nupkgs/*.nupkg; do
+            echo "Pushing $(basename "$f")..."
+            dotnet nuget push "$f" \
+              --source https://api.nuget.org/v3/index.json \
+              --api-key ${{ secrets.NUGET_API_KEY }} \
+              --skip-duplicate
+          done
+
+      - name: Push symbols to NuGet
+        continue-on-error: true
+        run: |
+          for f in ./nupkgs/*.snupkg; do
+            [ -f "$f" ] || continue
+            echo "Pushing symbols $(basename "$f")..."
+            dotnet nuget push "$f" \
+              --source https://api.nuget.org/v3/index.json \
+              --api-key ${{ secrets.NUGET_API_KEY }} \
+              --skip-duplicate
+          done

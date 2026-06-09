@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/TickerQ.Sample.MongoDB/TickerQ.Sample.MongoDB.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/TickerQ.MongoDB/TickerQ.MongoDB.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TickerQ.MongoDB.Tests/TickerQ.MongoDB.Tests.csproj" />
+  </Folder>
+</Solution>
