@@ -3,7 +3,7 @@
 [![CI](https://github.com/alexjamesbrown/TickerQ.MongoDB/actions/workflows/ci.yml/badge.svg)](https://github.com/alexjamesbrown/TickerQ.MongoDB/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/TickerQ.MongoDB.svg)](https://www.nuget.org/packages/TickerQ.MongoDB/)
 
-MongoDB persistence provider for [TickerQ](https://tickerq.net/) — a drop-in alternative to `TickerQ.EntityFrameworkCore`. Pick one or the other, not both.
+MongoDB persistence provider for [TickerQ](https://tickerq.net/) - a drop-in alternative to `TickerQ.EntityFrameworkCore`.
 
 Uses the official `MongoDB.Driver` directly. No EF Core, no ODM.
 
