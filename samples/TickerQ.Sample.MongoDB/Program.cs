@@ -1,7 +1,5 @@
-using TickerQ.Dashboard.DependencyInjection;
 using TickerQ.DependencyInjection;
 using TickerQ.MongoDB.DependencyInjection;
-using TickerQ.Utilities.Base;
 using TickerQ.Utilities.Entities;
 using TickerQ.Utilities.Interfaces.Managers;
 
@@ -17,7 +15,13 @@ builder.Services.AddTickerQ(options =>
             connectionString: builder.Configuration["Mongo:ConnectionString"] ?? "mongodb://localhost:27017",
             databaseName: builder.Configuration["Mongo:Database"] ?? "tickerq");
     });
-    options.AddDashboard();
+});
+
+// Lambda-based registration — no [TickerFunction] attribute, no source generator dependency.
+builder.Services.MapTicker("MongoSample_HelloWorld", (ctx, _) =>
+{
+    Console.WriteLine($"[Mongo] Hello from TickerQ! Id={ctx.Id}, ScheduledFor={ctx.ScheduledFor:O}");
+    return Task.CompletedTask;
 });
 
 var app = builder.Build();
@@ -31,20 +35,10 @@ app.MapPost("/schedule-sample", async (ITimeTickerManager<TimeTickerEntity> mana
     var result = await manager.AddAsync(new TimeTickerEntity
     {
         Function = "MongoSample_HelloWorld",
-        ExecutionTime = DateTime.UtcNow.AddSeconds(5)
+        ExecutionTime = DateTime.UtcNow.AddSeconds(3)
     });
 
     return Results.Ok(new { result.Result.Id, ScheduledFor = result.Result.ExecutionTime });
 });
 
 app.Run();
-
-public class SampleJobs
-{
-    [TickerFunction("MongoSample_HelloWorld")]
-    public Task HelloWorldAsync(TickerFunctionContext context, CancellationToken cancellationToken)
-    {
-        Console.WriteLine($"[Mongo] Hello from TickerQ! Id={context.Id}, ScheduledFor={context.ScheduledFor:O}");
-        return Task.CompletedTask;
-    }
-}
