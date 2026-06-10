@@ -14,7 +14,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="MongoDB.Driver" Version="3.5.0" />
+		<PackageReference Include="MongoDB.Driver" Version="3.9.0" />
 		<PackageReference Include="TickerQ.Utilities" Version="$(TickerQVersion)" />
 		<PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.102" PrivateAssets="All" />
 	</ItemGroup>
