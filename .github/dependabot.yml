@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # NuGet packages across all csproj files
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      mongodb:
+        patterns:
+          - "MongoDB.*"
+          - "Testcontainers.MongoDb"
+      tickerq:
+        patterns:
+          - "TickerQ*"
+      test-tools:
+        patterns:
+          - "xunit*"
+          - "Microsoft.NET.Test.Sdk"
+          - "NSubstitute"
+          - "coverlet.*"
+
+  # GitHub Actions workflow updates
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

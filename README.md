@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/alexjamesbrown/TickerQ.MongoDB/actions/workflows/ci.yml/badge.svg)](https://github.com/alexjamesbrown/TickerQ.MongoDB/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/TickerQ.MongoDB.svg)](https://www.nuget.org/packages/TickerQ.MongoDB/)
+[![Downloads](https://img.shields.io/nuget/dt/TickerQ.MongoDB.svg)](https://www.nuget.org/packages/TickerQ.MongoDB/)
 
 MongoDB persistence provider for [TickerQ](https://tickerq.net/) - a drop-in alternative to `TickerQ.EntityFrameworkCore`.
 
