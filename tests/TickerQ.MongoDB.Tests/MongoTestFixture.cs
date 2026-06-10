@@ -67,4 +67,17 @@ public class MongoTestFixture : IAsyncLifetime
     /// <summary>Internal helper to instantiate a fresh provisioner for idempotency tests.</summary>
     internal TickerIndexProvisioner<TimeTickerEntity, CronTickerEntity> NewProvisioner()
         => new(_context);
+
+    /// <summary>
+    /// Build a fresh provider with a custom clock and node identifier. Used by concurrency
+    /// tests that need each racer to have a distinct identity and a real wall-clock so the
+    /// UpdatedAt CAS predicate genuinely changes per acquisition (the fixture's fixed clock
+    /// would let multiple racers all "succeed" via Mongo's no-op-write semantics).
+    /// </summary>
+    internal ITickerPersistenceProvider<TimeTickerEntity, CronTickerEntity> NewProvider(
+        ITickerClock clock, string nodeIdentifier)
+    {
+        return new TickerMongoPersistenceProvider<TimeTickerEntity, CronTickerEntity>(
+            _context, clock, new SchedulerOptionsBuilder { NodeIdentifier = nodeIdentifier });
+    }
 }

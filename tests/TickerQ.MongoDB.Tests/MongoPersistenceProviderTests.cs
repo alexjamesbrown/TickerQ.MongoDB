@@ -1,8 +1,10 @@
 using MongoDB.Driver;
+using NSubstitute;
 using TickerQ.MongoDB.Infrastructure;
 using TickerQ.Utilities;
 using TickerQ.Utilities.Entities;
 using TickerQ.Utilities.Enums;
+using TickerQ.Utilities.Interfaces;
 using TickerQ.Utilities.Models;
 
 namespace TickerQ.MongoDB.Tests;
@@ -453,6 +455,108 @@ public class MongoPersistenceProviderTests : IClassFixture<MongoTestFixture>, IA
         {
             TickerFunctionProvider.ReplaceFunctions(savedFunctions);
         }
+    }
+
+    // ====================================================================
+    // Concurrency stress tests
+    // ====================================================================
+
+    [Fact]
+    public async Task QueueTimeTickers_UnderConcurrentRacersWithDistinctNodes_ExactlyOneAcquires()
+    {
+        // Model N independent scheduler nodes racing to acquire the same idle ticker.
+        // Each racer has a distinct provider (distinct NodeIdentifier) and a real
+        // wall-clock so the UpdatedAt CAS predicate genuinely changes per call —
+        // the fixture's fixed clock would mask the predicate by letting Mongo
+        // collapse no-op writes (same field-value sets) into ModifiedCount=0.
+        const int N = 32;
+
+        var ticker = NewTimeTicker();
+        await _f.Provider.AddTimeTickers([ticker], CancellationToken.None);
+
+        // Every racer reads the same starting UpdatedAt and tries to flip it.
+        var fresh = await _f.Provider.GetTimeTickerById(ticker.Id, CancellationToken.None);
+        Assert.NotNull(fresh);
+        var startingUpdatedAt = fresh!.UpdatedAt;
+
+        var winCount = 0;
+        var winnerNode = "";
+        var winnerLock = new object();
+
+        async Task RaceOne(int n)
+        {
+            var clock = Substitute.For<ITickerClock>();
+            clock.UtcNow.Returns(_ => DateTime.UtcNow);
+            var node = $"racer-{n}";
+            var racerProvider = _f.NewProvider(clock, node);
+
+            await foreach (var t in racerProvider.QueueTimeTickers(
+                [TickerRef(ticker.Id, startingUpdatedAt)],
+                CancellationToken.None))
+            {
+                Interlocked.Increment(ref winCount);
+                lock (winnerLock) winnerNode = node;
+            }
+        }
+
+        await Task.WhenAll(Enumerable.Range(0, N).Select(RaceOne));
+
+        Assert.Equal(1, winCount);
+
+        // Cross-check from the DB: row reflects the winner's state.
+        var after = await _f.TimeTickers
+            .Find(Builders<TimeTickerEntity>.Filter.Eq(x => x.Id, ticker.Id))
+            .FirstOrDefaultAsync();
+        Assert.Equal(TickerStatus.Queued, after.Status);
+        Assert.Equal(winnerNode, after.LockHolder);
+    }
+
+    [Fact]
+    public async Task QueueCronTickerOccurrences_ConcurrentInsertersForSameSlot_OnlyOneSucceedsViaUniqueIndex()
+    {
+        // The unique index on (CronTickerId, ExecutionTime) is the dedup mechanism
+        // for the INSERT path. N racers all try to create an occurrence at the same
+        // slot; the index must reject all but one with a DuplicateKey error, which
+        // the provider swallows silently.
+        const int N = 32;
+
+        var cron = NewCron();
+        await _f.Provider.InsertCronTickers([cron], CancellationToken.None);
+
+        var executionTime = _f.FixedNow.AddSeconds(2);
+        var winCount = 0;
+
+        async Task RaceOne()
+        {
+            var ctx = new InternalManagerContext(cron.Id)
+            {
+                FunctionName = cron.Function,
+                Expression = cron.Expression,
+                Retries = 0,
+                RetryIntervals = Array.Empty<int>(),
+                NextCronOccurrence = null // INSERT path
+            };
+
+            await foreach (var occ in _f.Provider.QueueCronTickerOccurrences(
+                (executionTime, new[] { ctx }),
+                CancellationToken.None))
+            {
+                Interlocked.Increment(ref winCount);
+            }
+        }
+
+        await Task.WhenAll(Enumerable.Range(0, N).Select(_ => RaceOne()));
+
+        Assert.Equal(1, winCount);
+
+        // Exactly one occurrence row at that slot, no duplicates leaked through.
+        var rows = await _f.CronTickerOccurrences
+            .Find(Builders<CronTickerOccurrenceEntity<CronTickerEntity>>.Filter.And(
+                Builders<CronTickerOccurrenceEntity<CronTickerEntity>>.Filter.Eq(x => x.CronTickerId, cron.Id),
+                Builders<CronTickerOccurrenceEntity<CronTickerEntity>>.Filter.Eq(x => x.ExecutionTime, executionTime)))
+            .ToListAsync();
+        Assert.Single(rows);
+        Assert.Equal(TickerStatus.Queued, rows[0].Status);
     }
 
     [Fact]
