@@ -1,4 +1,5 @@
 using MongoDB.Driver;
+using TickerQ.MongoDB.Infrastructure;
 using TickerQ.Utilities.Entities;
 using TickerQ.Utilities.Enums;
 using TickerQ.Utilities.Models;
@@ -14,6 +15,13 @@ public class MongoPersistenceProviderTests : IClassFixture<MongoTestFixture>, IA
 
     public Task InitializeAsync() => _f.DropAllAsync();
     public Task DisposeAsync() => Task.CompletedTask;
+
+    private static TimeTickerEntity TickerRef(Guid id, DateTime updatedAt)
+    {
+        var t = new TimeTickerEntity { Id = id };
+        InternalSetters<TimeTickerEntity>.Set(t, nameof(TimeTickerEntity.UpdatedAt), updatedAt);
+        return t;
+    }
 
     private TimeTickerEntity NewTimeTicker(DateTime? executionTime = null, TickerStatus status = TickerStatus.Idle)
     {
@@ -83,13 +91,13 @@ public class MongoPersistenceProviderTests : IClassFixture<MongoTestFixture>, IA
         Assert.NotNull(fresh);
 
         var queued1 = new List<TimeTickerEntity>();
-        await foreach (var t in _f.Provider.QueueTimeTickers([new TimeTickerEntity { Id = fresh!.Id, UpdatedAt = fresh.UpdatedAt }], CancellationToken.None))
+        await foreach (var t in _f.Provider.QueueTimeTickers([TickerRef(fresh!.Id, fresh.UpdatedAt)], CancellationToken.None))
             queued1.Add(t);
         Assert.Single(queued1);
 
         // Second attempt with the old UpdatedAt should win nothing — CAS fails.
         var queued2 = new List<TimeTickerEntity>();
-        await foreach (var t in _f.Provider.QueueTimeTickers([new TimeTickerEntity { Id = fresh.Id, UpdatedAt = fresh.UpdatedAt }], CancellationToken.None))
+        await foreach (var t in _f.Provider.QueueTimeTickers([TickerRef(fresh.Id, fresh.UpdatedAt)], CancellationToken.None))
             queued2.Add(t);
         Assert.Empty(queued2);
     }
@@ -101,7 +109,7 @@ public class MongoPersistenceProviderTests : IClassFixture<MongoTestFixture>, IA
         await _f.Provider.AddTimeTickers([ticker], CancellationToken.None);
 
         var fresh = await _f.Provider.GetTimeTickerById(ticker.Id, CancellationToken.None);
-        await foreach (var _ in _f.Provider.QueueTimeTickers([new TimeTickerEntity { Id = fresh!.Id, UpdatedAt = fresh.UpdatedAt }], CancellationToken.None)) { }
+        await foreach (var _ in _f.Provider.QueueTimeTickers([TickerRef(fresh!.Id, fresh.UpdatedAt)], CancellationToken.None)) { }
 
         await _f.Provider.ReleaseAcquiredTimeTickers([ticker.Id], CancellationToken.None);
 

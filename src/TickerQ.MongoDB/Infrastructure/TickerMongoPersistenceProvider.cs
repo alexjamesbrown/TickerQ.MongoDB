@@ -8,8 +8,8 @@ using System.Threading.Tasks;
 using MongoDB.Driver;
 using TickerQ.Utilities;
 using TickerQ.Utilities.Entities;
+using TickerQ.Utilities.Entities.BaseEntity;
 using TickerQ.Utilities.Enums;
-using TickerQ.Utilities.Infrastructure;
 using TickerQ.Utilities.Interfaces;
 using TickerQ.Utilities.Models;
 
@@ -24,8 +24,7 @@ namespace TickerQ.MongoDB.Infrastructure
         private readonly ITickerClock _clock;
         private readonly string _lockHolder;
 
-        private static readonly Func<TTimeTicker, TimeTickerEntity> ProjectTimeTicker
-            = MappingExtensions.ForQueueTimeTickers<TTimeTicker>().Compile();
+        private static TimeTickerEntity ProjectTimeTicker(TTimeTicker e) => EntityProjections.ToQueueTimeTicker(e);
 
         public TickerMongoPersistenceProvider(
             ITickerMongoContext<TTimeTicker, TCronTicker> context,
@@ -64,10 +63,10 @@ namespace TickerQ.MongoDB.Infrastructure
                 if (result.ModifiedCount <= 0)
                     continue;
 
-                ticker.UpdatedAt = now;
-                ticker.LockHolder = _lockHolder;
-                ticker.LockedAt = now;
-                ticker.Status = TickerStatus.Queued;
+                InternalSetters<TimeTickerEntity>.Set(ticker, nameof(ticker.UpdatedAt), now);
+                InternalSetters<TimeTickerEntity>.Set(ticker, nameof(ticker.LockHolder), _lockHolder);
+                InternalSetters<TimeTickerEntity>.Set(ticker, nameof(ticker.LockedAt), (DateTime?)now);
+                InternalSetters<TimeTickerEntity>.Set(ticker, nameof(ticker.Status), TickerStatus.Queued);
                 yield return ticker;
             }
         }
@@ -331,11 +330,11 @@ namespace TickerQ.MongoDB.Infrastructure
                         Id = Guid.NewGuid(),
                         Function = function,
                         Expression = expression,
-                        InitIdentifier = $"MemoryTicker_Seeded_{function}",
-                        CreatedAt = now,
-                        UpdatedAt = now,
                         Request = Array.Empty<byte>()
                     };
+                    InternalSetters<TCronTicker>.Set(entity, nameof(BaseTickerEntity.InitIdentifier), $"MemoryTicker_Seeded_{function}");
+                    InternalSetters<TCronTicker>.Set(entity, nameof(BaseTickerEntity.CreatedAt), now);
+                    InternalSetters<TCronTicker>.Set(entity, nameof(BaseTickerEntity.UpdatedAt), now);
                     await cronSet.InsertOneAsync(entity, cancellationToken: cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -349,8 +348,7 @@ namespace TickerQ.MongoDB.Infrastructure
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            var project = MappingExtensions.ForCronTickerExpressions<TCronTicker>().Compile();
-            return rows.Select(project).ToArray();
+            return rows.Select(EntityProjections.ToCronTickerExpression).ToArray();
         }
 
         // ===================================================================
@@ -427,15 +425,16 @@ namespace TickerQ.MongoDB.Infrastructure
 
                     if (!inserted) continue;
 
-                    toAdd.CronTicker = new TCronTicker
+                    var insertedCronSnapshot = new TCronTicker
                     {
                         Id = item.Id,
                         Function = item.FunctionName,
-                        InitIdentifier = _lockHolder,
                         Expression = item.Expression,
                         Retries = item.Retries,
                         RetryIntervals = item.RetryIntervals
                     };
+                    InternalSetters<TCronTicker>.Set(insertedCronSnapshot, nameof(BaseTickerEntity.InitIdentifier), _lockHolder);
+                    toAdd.CronTicker = insertedCronSnapshot;
                     yield return toAdd;
                 }
                 else
@@ -455,6 +454,15 @@ namespace TickerQ.MongoDB.Infrastructure
                     var result = await coll.UpdateOneAsync(filter, update, cancellationToken: cancellationToken).ConfigureAwait(false);
                     if (result.ModifiedCount <= 0) continue;
 
+                    var updatedCronSnapshot = new TCronTicker
+                    {
+                        Id = item.Id,
+                        Function = item.FunctionName,
+                        Expression = item.Expression,
+                        Retries = item.Retries,
+                        RetryIntervals = item.RetryIntervals
+                    };
+                    InternalSetters<TCronTicker>.Set(updatedCronSnapshot, nameof(BaseTickerEntity.InitIdentifier), _lockHolder);
                     yield return new CronTickerOccurrenceEntity<TCronTicker>
                     {
                         Id = item.NextCronOccurrence.Id,
@@ -465,15 +473,7 @@ namespace TickerQ.MongoDB.Infrastructure
                         LockedAt = now,
                         UpdatedAt = now,
                         CreatedAt = item.NextCronOccurrence.CreatedAt,
-                        CronTicker = new TCronTicker
-                        {
-                            Id = item.Id,
-                            Function = item.FunctionName,
-                            InitIdentifier = _lockHolder,
-                            Expression = item.Expression,
-                            Retries = item.Retries,
-                            RetryIntervals = item.RetryIntervals
-                        }
+                        CronTicker = updatedCronSnapshot
                     };
                 }
             }
@@ -689,7 +689,7 @@ namespace TickerQ.MongoDB.Infrastructure
 
         private async Task<int> InsertWithChildren(TTimeTicker ticker, Guid? parentId, CancellationToken ct)
         {
-            if (parentId.HasValue) ticker.ParentId = parentId.Value;
+            if (parentId.HasValue) InternalSetters<TTimeTicker>.Set(ticker, nameof(ticker.ParentId), (Guid?)parentId.Value);
             await _context.TimeTickers.InsertOneAsync(ticker, cancellationToken: ct).ConfigureAwait(false);
             var count = 1;
             if (ticker.Children != null)
@@ -709,7 +709,7 @@ namespace TickerQ.MongoDB.Infrastructure
 
         private async Task<int> ReplaceWithChildren(TTimeTicker ticker, Guid? parentId, CancellationToken ct)
         {
-            if (parentId.HasValue) ticker.ParentId = parentId.Value;
+            if (parentId.HasValue) InternalSetters<TTimeTicker>.Set(ticker, nameof(ticker.ParentId), (Guid?)parentId.Value);
             var result = await _context.TimeTickers.ReplaceOneAsync(
                 Builders<TTimeTicker>.Filter.Eq(x => x.Id, ticker.Id),
                 ticker,

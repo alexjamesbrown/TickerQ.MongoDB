@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Concurrent;
+using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
 using TickerQ.Utilities;
 using TickerQ.Utilities.Entities;
 
@@ -28,8 +31,38 @@ namespace TickerQ.MongoDB.DependencyInjection
                 throw new InvalidOperationException(
                     "TickerQ.MongoDB: you must call UseTickerQMongoClient(...) or UseExistingMongoClient(...) on the option builder.");
 
-            tickerConfiguration.ExternalProviderConfigServiceAction += optionBuilder.ConfigureServices;
+            // ExternalProviderConfigServiceAction is internal on TickerOptionsBuilder<,> and
+            // TickerQ.Utilities does not (yet) grant InternalsVisibleTo("TickerQ.MongoDB"),
+            // so we go through reflection. Runs once at DI registration — cost is negligible.
+            // Drop this helper once upstream lands the visibility grant.
+            ExternalProviderConfig.Append(tickerConfiguration, optionBuilder.ConfigureServices);
             return tickerConfiguration;
+        }
+
+        private static class ExternalProviderConfig
+        {
+            private static readonly ConcurrentDictionary<Type, PropertyInfo> PropertyCache = new();
+
+            public static void Append<TTimeTicker, TCronTicker>(
+                TickerOptionsBuilder<TTimeTicker, TCronTicker> builder,
+                Action<IServiceCollection> contribution)
+                where TTimeTicker : TimeTickerEntity<TTimeTicker>, new()
+                where TCronTicker : CronTickerEntity, new()
+            {
+                var prop = PropertyCache.GetOrAdd(typeof(TickerOptionsBuilder<TTimeTicker, TCronTicker>),
+                    t => t.GetProperty(
+                        "ExternalProviderConfigServiceAction",
+                        BindingFlags.NonPublic | BindingFlags.Instance)
+                        ?? throw new InvalidOperationException(
+                            "ExternalProviderConfigServiceAction not found on TickerOptionsBuilder. " +
+                            "The TickerQ.Utilities version may be incompatible with this provider."));
+
+                var current = (Action<IServiceCollection>)prop.GetValue(builder);
+                var combined = current is null
+                    ? contribution
+                    : (Action<IServiceCollection>)Delegate.Combine(current, contribution);
+                prop.SetValue(builder, combined);
+            }
         }
     }
 }
