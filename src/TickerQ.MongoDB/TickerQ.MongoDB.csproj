@@ -4,9 +4,13 @@
 		<PackageId>TickerQ.MongoDB</PackageId>
 		<Description>MongoDB persistence provider for TickerQ. Uses the official MongoDB.Driver — no EF Core, no ODM.</Description>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+		<!-- Version is derived from git tags by MinVer. Tag the repo with e.g. v0.1.0
+		     to release 0.1.0; intermediate commits build as pre-release with the
+		     short SHA embedded in InformationalVersion for traceability. -->
+		<MinVerTagPrefix>v</MinVerTagPrefix>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -17,5 +21,6 @@
 		<PackageReference Include="MongoDB.Driver" Version="3.5.0" />
 		<PackageReference Include="TickerQ.Utilities" Version="$(TickerQVersion)" />
 		<PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.102" PrivateAssets="All" />
+		<PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="All" />
 	</ItemGroup>
 </Project>
