@@ -10,6 +10,9 @@ jobs:
     name: Pack and Publish to NuGet
     runs-on: ubuntu-latest
     environment: nuget-publish
+    permissions:
+      contents: read
+      id-token: write   # required for NuGet Trusted Publishing OIDC token exchange
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -50,13 +53,22 @@ jobs:
           name: nupkgs
           path: ./nupkgs
 
+      # NuGet Trusted Publishing — exchanges the GitHub OIDC token for a 1-hour API key.
+      # No long-lived NUGET_API_KEY required. NUGET_USER is your nuget.org profile name
+      # (NOT your email) and must match the policy owner registered on nuget.org.
+      - name: NuGet login (OIDC -> temporary API key)
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Push to NuGet
         run: |
           for f in ./nupkgs/*.nupkg; do
             echo "Pushing $(basename "$f")..."
             dotnet nuget push "$f" \
               --source https://api.nuget.org/v3/index.json \
-              --api-key ${{ secrets.NUGET_API_KEY }} \
+              --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} \
               --skip-duplicate
           done
 
@@ -68,6 +80,6 @@ jobs:
             echo "Pushing symbols $(basename "$f")..."
             dotnet nuget push "$f" \
               --source https://api.nuget.org/v3/index.json \
-              --api-key ${{ secrets.NUGET_API_KEY }} \
+              --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} \
               --skip-duplicate
           done
