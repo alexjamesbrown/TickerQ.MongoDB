@@ -1,25 +1,27 @@
 # TickerQ.MongoDB
 
 [![CI](https://github.com/alexjamesbrown/TickerQ.MongoDB/actions/workflows/ci.yml/badge.svg)](https://github.com/alexjamesbrown/TickerQ.MongoDB/actions/workflows/ci.yml)
-[![NuGet](https://img.shields.io/nuget/v/TickerQ.MongoDB.svg)](https://www.nuget.org/packages/TickerQ.MongoDB/)
-[![Downloads](https://img.shields.io/nuget/dt/TickerQ.MongoDB.svg)](https://www.nuget.org/packages/TickerQ.MongoDB/)
+[![NuGet](https://img.shields.io/nuget/v/alexjamesbrown.TickerQ.MongoDB.svg)](https://www.nuget.org/packages/alexjamesbrown.TickerQ.MongoDB/)
+[![Downloads](https://img.shields.io/nuget/dt/alexjamesbrown.TickerQ.MongoDB.svg)](https://www.nuget.org/packages/alexjamesbrown.TickerQ.MongoDB/)
 
 MongoDB persistence provider for [TickerQ](https://tickerq.net/). Drop-in alternative to `TickerQ.EntityFrameworkCore` — pick one or the other, not both.
 
 Uses the official `MongoDB.Driver` directly. No EF Core, no ODM.
 
+> **Note on the package ID**: published as `alexjamesbrown.TickerQ.MongoDB` because Arcenox has reserved the `TickerQ.*` prefix on nuget.org. The third-party convention is `<Owner>.TickerQ.*` (see `eQuantic.TickerQ.*`, `Volo.Abp.TickerQ`, etc.). If/when an official `TickerQ.MongoDB` ships from Arcenox, this package will be deprecated in favour of it.
+
 ## Compatibility
 
-| `TickerQ.MongoDB` | `TickerQ.Utilities` | .NET    | `MongoDB.Driver` |
-|-------------------|---------------------|---------|------------------|
-| `10.4.x`          | `[10.4.0, 11.0.0)`  | `net10` | `3.5.x`          |
+| `alexjamesbrown.TickerQ.MongoDB` | `TickerQ.Utilities` | .NET    | `MongoDB.Driver` |
+|----------------------------------|---------------------|---------|------------------|
+| `0.1.x`                          | `[10.4.0, 11.0.0)`  | `net10` | `3.5.x`          |
 
 Tested against `mongo:7`. Standalone, replica set, and Atlas (including the free tier) all work — concurrency uses single-document atomic operations, no multi-document transactions.
 
 ## Install
 
 ```bash
-dotnet add package TickerQ.MongoDB
+dotnet add package alexjamesbrown.TickerQ.MongoDB
 ```
 
 ## Quickstart

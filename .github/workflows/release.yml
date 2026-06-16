@@ -65,14 +65,16 @@ jobs:
         with:
           user: ${{ vars.NUGET_USER }}
 
+      # NOTE: --skip-duplicate intentionally omitted on the primary push so
+      # prefix-reservation 409s, auth 409s, etc. surface as workflow failures
+      # rather than being silently swallowed as "already exists".
       - name: Push to NuGet
         run: |
           for f in ./nupkgs/*.nupkg; do
             echo "Pushing $(basename "$f")..."
             dotnet nuget push "$f" \
               --source https://api.nuget.org/v3/index.json \
-              --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} \
-              --skip-duplicate
+              --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           done
 
       - name: Push symbols to NuGet
