@@ -55,12 +55,13 @@ jobs:
 
       # NuGet Trusted Publishing — exchanges the GitHub OIDC token for a 1-hour API key.
       # No long-lived NUGET_API_KEY required. NUGET_USER is your nuget.org profile name
-      # (NOT your email) and must match the policy owner registered on nuget.org.
+      # (NOT your email) and must match the policy owner registered on nuget.org. It's
+      # public information so it's stored as an environment variable, not a secret.
       - name: NuGet login (OIDC -> temporary API key)
         id: nuget-login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
-          user: ${{ secrets.NUGET_USER }}
+          user: ${{ vars.NUGET_USER }}
 
       - name: Push to NuGet
         run: |
