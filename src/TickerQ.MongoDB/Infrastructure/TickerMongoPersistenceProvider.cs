@@ -398,8 +398,8 @@ namespace TickerQ.MongoDB.Infrastructure
                 if (item.NextCronOccurrence is null)
                 {
                     // INSERT path. Unique index on (CronTickerId, ExecutionTime) is our dedup — a
-                    // duplicate-key error here means another scheduler already claimed this slot,
-                    // so skip silently (mirrors EF's Upsert.NoUpdate() returning 0).
+                    // slot another scheduler already claimed is skipped silently (mirrors EF's
+                    // Upsert.NoUpdate() returning 0).
                     var toAdd = new CronTickerOccurrenceEntity<TCronTicker>
                     {
                         Id = Guid.NewGuid(),
@@ -412,16 +412,7 @@ namespace TickerQ.MongoDB.Infrastructure
                         UpdatedAt = now
                     };
 
-                    bool inserted;
-                    try
-                    {
-                        await coll.InsertOneAsync(toAdd, cancellationToken: cancellationToken).ConfigureAwait(false);
-                        inserted = true;
-                    }
-                    catch (MongoWriteException ex) when (ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
-                    {
-                        inserted = false;
-                    }
+                    var inserted = await TryClaimOccurrenceSlotAsync(toAdd, cancellationToken).ConfigureAwait(false);
 
                     if (!inserted) continue;
 
@@ -834,17 +825,50 @@ namespace TickerQ.MongoDB.Infrastructure
             var count = 0;
             foreach (var occ in cronTickerOccurrences)
             {
-                try
-                {
-                    await _context.CronTickerOccurrences.InsertOneAsync(occ, cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (await TryClaimOccurrenceSlotAsync(occ, cancellationToken).ConfigureAwait(false))
                     count++;
-                }
-                catch (MongoWriteException ex) when (ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
-                {
-                    // unique-index violation: another writer claimed the same (CronTickerId, ExecutionTime) slot
-                }
             }
             return count;
+        }
+
+        /// <summary>
+        /// Insert <paramref name="occurrence"/> only if its (CronTickerId, ExecutionTime) slot is
+        /// free; returns whether this caller took it.
+        /// </summary>
+        /// <remarks>
+        /// An all-<c>$setOnInsert</c> upsert, so a taken slot is a no-op write rather than a
+        /// duplicate-key failure. Insert-and-catch works too, but the driver reports the rejected
+        /// command through its diagnostic events before we see the exception, so consumers with
+        /// command instrumentation get an error logged every time — and a scheduler restarting
+        /// while an occurrence it planned is still pending hits this constantly.
+        ///
+        /// <c>$setOnInsert</c> never touches an existing document, so an occurrence another node
+        /// has locked or executed is untouched. The catch stays: two upserts that both miss can
+        /// still race to insert.
+        /// </remarks>
+        private async Task<bool> TryClaimOccurrenceSlotAsync(
+            CronTickerOccurrenceEntity<TCronTicker> occurrence, CancellationToken cancellationToken)
+        {
+            var fb = Builders<CronTickerOccurrenceEntity<TCronTicker>>.Filter;
+            var filter = fb.And(
+                fb.Eq(x => x.CronTickerId, occurrence.CronTickerId),
+                fb.Eq(x => x.ExecutionTime, occurrence.ExecutionTime));
+
+            try
+            {
+                var result = await _context.CronTickerOccurrences.UpdateOneAsync(
+                    filter,
+                    MongoUpdateBuilders.InsertOnlyUpsert(occurrence),
+                    new UpdateOptions { IsUpsert = true },
+                    cancellationToken).ConfigureAwait(false);
+
+                return result.UpsertedId != null;
+            }
+            catch (MongoWriteException ex) when (ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                // Lost the race to a concurrent upsert that also missed — the slot is taken.
+                return false;
+            }
         }
 
         public async Task<int> RemoveCronTickerOccurrences(Guid[] cronTickerOccurrences, CancellationToken cancellationToken)

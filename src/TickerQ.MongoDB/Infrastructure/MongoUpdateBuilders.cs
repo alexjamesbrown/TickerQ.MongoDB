@@ -1,4 +1,6 @@
 using System;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 using TickerQ.Utilities.Entities;
 using TickerQ.Utilities.Enums;
@@ -94,6 +96,26 @@ namespace TickerQ.MongoDB.Infrastructure
 
             u = Combine(u, defs.Set(x => x.UpdatedAt, updatedAt));
             return u;
+        }
+
+        /// <summary>
+        /// Writes <paramref name="occurrence"/> in full when the upsert inserts, and nothing at all
+        /// when it matches. See TickerMongoPersistenceProvider.TryClaimOccurrenceSlotAsync.
+        /// </summary>
+        public static UpdateDefinition<CronTickerOccurrenceEntity<TCronTicker>> InsertOnlyUpsert<TCronTicker>(
+            CronTickerOccurrenceEntity<TCronTicker> occurrence)
+            where TCronTicker : CronTickerEntity, new()
+        {
+            // Through the class map, not field-by-field, so the document matches what InsertOneAsync
+            // wrote — including any property added to the entity later.
+            var document = occurrence.ToBsonDocument();
+
+            // The server applies the filter's equality terms itself; restating them here conflicts.
+            var classMap = BsonClassMap.LookupClassMap(typeof(CronTickerOccurrenceEntity<TCronTicker>));
+            document.Remove(classMap.GetMemberMap(nameof(CronTickerOccurrenceEntity<TCronTicker>.CronTickerId)).ElementName);
+            document.Remove(classMap.GetMemberMap(nameof(CronTickerOccurrenceEntity<TCronTicker>.ExecutionTime)).ElementName);
+
+            return new BsonDocument("$setOnInsert", document);
         }
 
         public static FilterDefinition<TTimeTicker> CanAcquireTimeTicker<TTimeTicker>(string lockHolder)
