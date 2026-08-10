@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using MongoDB.Driver;
+using MongoDB.Driver.Core.Events;
 using NSubstitute;
 using Testcontainers.MongoDb;
 using TickerQ.MongoDB.Indexes;
@@ -79,5 +81,30 @@ public class MongoTestFixture : IAsyncLifetime
     {
         return new TickerMongoPersistenceProvider<TimeTickerEntity, CronTickerEntity>(
             _context, clock, new SchedulerOptionsBuilder { NodeIdentifier = nodeIdentifier });
+    }
+
+    /// <summary>
+    /// Build a provider on its own client that records every write the server rejects, into
+    /// <paramref name="writeErrors"/>. Same database as the shared provider.
+    /// </summary>
+    /// <remarks>
+    /// A rejected write comes back on an otherwise successful command, in a writeErrors array —
+    /// so this watches replies rather than CommandFailedEvent, which never fires for one.
+    /// </remarks>
+    internal ITickerPersistenceProvider<TimeTickerEntity, CronTickerEntity> NewWriteErrorRecordingProvider(
+        string nodeIdentifier, ConcurrentBag<string> writeErrors)
+    {
+        var settings = MongoClientSettings.FromConnectionString(Container.GetConnectionString());
+        settings.ClusterConfigurator = cb => cb.Subscribe<CommandSucceededEvent>(e =>
+        {
+            if (e.Reply != null && e.Reply.TryGetValue("writeErrors", out var errors))
+                writeErrors.Add($"{e.CommandName}: {errors}");
+        });
+
+        var context = new TickerMongoContext<TimeTickerEntity, CronTickerEntity>(
+            new MongoClient(settings).GetDatabase("tickerq_test"), "ticker_");
+
+        return new TickerMongoPersistenceProvider<TimeTickerEntity, CronTickerEntity>(
+            context, Clock, new SchedulerOptionsBuilder { NodeIdentifier = nodeIdentifier });
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using MongoDB.Driver;
 using NSubstitute;
 using TickerQ.MongoDB.Infrastructure;
@@ -198,6 +199,136 @@ public class MongoPersistenceProviderTests : IClassFixture<MongoTestFixture>, IA
 
         var inserted = await _f.Provider.InsertCronTickerOccurrences([occ1, occ2], CancellationToken.None);
         Assert.Equal(1, inserted);
+    }
+
+    [Fact]
+    public async Task QueueCronTickerOccurrences_SlotAlreadyTaken_ProvokesNoWriteError()
+    {
+        // A restarting scheduler re-plans a slot it already planned, so "taken" is the ordinary
+        // case and must not reach the server as a rejected write: the driver's OpenTelemetry
+        // instrumentation (3.9+) marks the operation span Error before the provider ever sees the
+        // exception, so catching it is not enough to keep it out of a consumer's logs.
+        //
+        // Asserted on the wire, not the stored rows: insert-and-catch leaves the same correct row
+        // behind, so only the write errors distinguish the two.
+        var writeErrors = new ConcurrentBag<string>();
+        var provider = _f.NewWriteErrorRecordingProvider("restarted-node", writeErrors);
+
+        var cron = NewCron();
+        await _f.Provider.InsertCronTickers([cron], CancellationToken.None);
+
+        var executionTime = _f.FixedNow.AddSeconds(30);
+
+        async Task<int> PlanTheSlot(ITickerPersistenceProvider<TimeTickerEntity, CronTickerEntity> p)
+        {
+            var ctx = new InternalManagerContext(cron.Id)
+            {
+                FunctionName = cron.Function,
+                Expression = cron.Expression,
+                Retries = 0,
+                RetryIntervals = Array.Empty<int>(),
+                NextCronOccurrence = null // INSERT path
+            };
+
+            var planned = 0;
+            await foreach (var _ in p.QueueCronTickerOccurrences((executionTime, new[] { ctx }), CancellationToken.None))
+                planned++;
+            return planned;
+        }
+
+        Assert.Equal(1, await PlanTheSlot(provider));
+        Assert.Equal(0, await PlanTheSlot(provider)); // re-plan: declined, not rejected
+
+        Assert.Empty(writeErrors);
+    }
+
+    [Fact]
+    public async Task QueueCronTickerOccurrences_SlotAlreadyTaken_LeavesTheExistingOccurrenceIntact()
+    {
+        // Declining must not mean overwriting — the occurrence sitting there may already be locked
+        // or executed by whoever won it.
+        var cron = NewCron();
+        await _f.Provider.InsertCronTickers([cron], CancellationToken.None);
+
+        var executionTime = _f.FixedNow.AddSeconds(30);
+        var winner = new CronTickerOccurrenceEntity<CronTickerEntity>
+        {
+            Id = Guid.NewGuid(),
+            CronTickerId = cron.Id,
+            ExecutionTime = executionTime,
+            Status = TickerStatus.InProgress,
+            LockHolder = "winning-node",
+            LockedAt = _f.FixedNow,
+            CreatedAt = _f.FixedNow,
+            UpdatedAt = _f.FixedNow
+        };
+        Assert.Equal(1, await _f.Provider.InsertCronTickerOccurrences([winner], CancellationToken.None));
+
+        var latecomer = new CronTickerOccurrenceEntity<CronTickerEntity>
+        {
+            Id = Guid.NewGuid(),
+            CronTickerId = cron.Id,
+            ExecutionTime = executionTime,
+            Status = TickerStatus.Queued,
+            LockHolder = "losing-node",
+            LockedAt = _f.FixedNow.AddSeconds(1),
+            CreatedAt = _f.FixedNow.AddSeconds(1),
+            UpdatedAt = _f.FixedNow.AddSeconds(1)
+        };
+        Assert.Equal(0, await _f.Provider.InsertCronTickerOccurrences([latecomer], CancellationToken.None));
+
+        var rows = await _f.CronTickerOccurrences
+            .Find(Builders<CronTickerOccurrenceEntity<CronTickerEntity>>.Filter.Eq(x => x.CronTickerId, cron.Id))
+            .ToListAsync();
+
+        var survivor = Assert.Single(rows);
+        Assert.Equal(winner.Id, survivor.Id);
+        Assert.Equal(TickerStatus.InProgress, survivor.Status);
+        Assert.Equal("winning-node", survivor.LockHolder);
+        Assert.Equal(_f.FixedNow, survivor.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task InsertCronTickerOccurrences_StoresEveryFieldOfTheOccurrence()
+    {
+        // The document is now assembled from an update operator, so pin every field against
+        // silent loss.
+        var cron = NewCron();
+        await _f.Provider.InsertCronTickers([cron], CancellationToken.None);
+
+        var occ = new CronTickerOccurrenceEntity<CronTickerEntity>
+        {
+            Id = Guid.NewGuid(),
+            CronTickerId = cron.Id,
+            ExecutionTime = _f.FixedNow.AddSeconds(30),
+            Status = TickerStatus.Queued,
+            LockHolder = "some-node",
+            LockedAt = _f.FixedNow,
+            ExecutedAt = _f.FixedNow.AddSeconds(31),
+            ExceptionMessage = "boom",
+            ElapsedTime = 42,
+            RetryCount = 3,
+            CreatedAt = _f.FixedNow,
+            UpdatedAt = _f.FixedNow.AddSeconds(2)
+        };
+
+        Assert.Equal(1, await _f.Provider.InsertCronTickerOccurrences([occ], CancellationToken.None));
+
+        var stored = await _f.CronTickerOccurrences
+            .Find(Builders<CronTickerOccurrenceEntity<CronTickerEntity>>.Filter.Eq(x => x.Id, occ.Id))
+            .SingleAsync();
+
+        Assert.Equal(occ.CronTickerId, stored.CronTickerId);
+        Assert.Equal(occ.ExecutionTime, stored.ExecutionTime);
+        Assert.Equal(occ.Status, stored.Status);
+        Assert.Equal(occ.LockHolder, stored.LockHolder);
+        Assert.Equal(occ.LockedAt, stored.LockedAt);
+        Assert.Equal(occ.ExecutedAt, stored.ExecutedAt);
+        Assert.Equal(occ.ExceptionMessage, stored.ExceptionMessage);
+        Assert.Equal(occ.ElapsedTime, stored.ElapsedTime);
+        Assert.Equal(occ.RetryCount, stored.RetryCount);
+        Assert.Equal(occ.CreatedAt, stored.CreatedAt);
+        Assert.Equal(occ.UpdatedAt, stored.UpdatedAt);
     }
 
     [Fact]
